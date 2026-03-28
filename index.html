@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Spending Tracker</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f0fbf6; }
+    input, select, textarea, button { font-family: inherit; }
+    input:focus, select:focus, textarea:focus { outline: 2px solid #4AAEF6; outline-offset: 1px; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useCallback, useRef } = React;
+
+    const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+    const fmt = n => Number(n).toLocaleString("en-CA",{style:"currency",currency:"CAD",maximumFractionDigits:2});
+    const uuid = () => crypto.randomUUID();
+    const todayStr = () => new Date().toLocaleDateString("en-CA");
+    const currentMonthStr = () => { const n=new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,"0")}`; };
+
+    const SKY     = { 50:"#EFF8FF",100:"#DAEFFE",200:"#B8DFFD",300:"#8ACBFB",400:"#4AAEF6",500:"#1E90E8",600:"#1470C4",700:"#0F56A0",800:"#0C407C",900:"#072B55" };
+    const MINT    = { 50:"#F0FBF6",100:"#D6F5E6",200:"#AEEBD0",400:"#3DD68C",500:"#1BBD72",700:"#0D7A49" };
+    const PEACH   = { 50:"#FEF5F1",100:"#FDEEE8",200:"#FBCFBB",400:"#F4845A",500:"#E8623A",700:"#B84A23" };
+    const ROSE    = { 50:"#FFF0F3",100:"#FFD6DE",200:"#FFB3C1",400:"#FF6B8A",500:"#E8476A",700:"#B52D50" };
+    const LILAC   = { 50:"#F5F0FF",100:"#EDE0FF",200:"#D9BFFF",400:"#A07EE8",500:"#8560D4",700:"#5B3DB5" };
+    const SAGE    = { 50:"#F0F7F1",100:"#E4F2E6",200:"#C3E6C8",400:"#5FAD6A",500:"#3D9E4A",700:"#2E6B38" };
+    const AMBER   = { 50:"#FFFBF0",100:"#FEF3C7",400:"#F59E0B",700:"#92400E" };
+    const LEMON   = { 50:"#FEFCE8",100:"#FEF9C3",400:"#EAB308",700:"#713F12" };
+
+    const TAGS = ["Essential","Nice to have","Impulse"];
+    const TAG_STYLE = {
+      "Essential":    {bg:MINT[50],  text:MINT[700],  border:MINT[400],  bar:MINT[400]},
+      "Nice to have": {bg:LILAC[50], text:LILAC[700], border:LILAC[400], bar:LILAC[400]},
+      "Impulse":      {bg:PEACH[50], text:PEACH[700], border:PEACH[400], bar:PEACH[400]},
+    };
+
+    const PURCHASE_TYPES = [
+      {id:"physical",   label:"Physical item",      icon:"🛍️", desc:"Clothing, gadgets, household…"},
+      {id:"experience", label:"Experience / outing", icon:"🎉", desc:"Night out, concert, trip…"},
+      {id:"dining",     label:"Dining",              icon:"🍽️", desc:"Restaurant, café, delivery…"},
+    ];
+
+    const QUESTIONS = {
+      physical:[
+        {id:"urgent", label:"How urgent is it?",                        type:"select",options:["Can wait weeks/months","Nice to have soon","Need it this week","Need it today"]},
+        {id:"already",label:"Do you already own something similar?",    type:"select",options:["No, nothing like it","Sort of — mine is broken/old","Yes, but this is an upgrade","Yes, and mine works fine"]},
+        {id:"regret", label:"Will you regret NOT buying it in a month?",type:"select",options:["Definitely yes","Probably yes","Probably not","Definitely not"]},
+        {id:"afford", label:"Can you comfortably afford it right now?", type:"select",options:["Yes, well within budget","It's tight but manageable","I'd have to stretch my budget","Not really, but I want it anyway"]},
+        {id:"why",    label:"Why do you want this?",                    type:"text",  placeholder:"e.g. I've wanted it for months…"},
+      ],
+      experience:[
+        {id:"who",   label:"Who are you going with?",                  type:"select",options:["Solo","Partner / close friend","Small group","Large group / party"]},
+        {id:"freq",  label:"How often do you do this kind of outing?", type:"select",options:["Rarely — it's a treat","Once in a while","Fairly regularly","Very often"]},
+        {id:"fomo",  label:"What's driving this?",                     type:"select",options:["Genuine excitement, I really want to go","Social pressure / FOMO","Nothing better to do","It's a special occasion"]},
+        {id:"afford",label:"Can you comfortably afford it right now?", type:"select",options:["Yes, well within budget","It's tight but manageable","I'd have to stretch my budget","Not really, but I want it anyway"]},
+        {id:"memory",label:"Will this create a meaningful memory?",    type:"select",options:["Definitely — it's unique","Probably yes","Maybe, hard to say","Probably not"]},
+      ],
+      dining:[
+        {id:"freq",    label:"How often do you eat out this month?",     type:"select",options:["Rarely — this is a treat","A few times","Quite a lot","Almost every day"]},
+        {id:"occasion",label:"What's the occasion?",                    type:"select",options:["Special celebration","Catching up with someone","Convenience / no time to cook","Just craving it"]},
+        {id:"cook",    label:"Could you cook something similar at home?",type:"select",options:["No — this is a unique dish","I could, but it'd be a lot of effort","I could, but I don't feel like it","Easily — I just don't want to"]},
+        {id:"afford",  label:"Can you comfortably afford it right now?", type:"select",options:["Yes, well within budget","It's tight but manageable","I'd have to stretch my budget","Not really, but I want it anyway"]},
+        {id:"worth",   label:"Is the price worth it for the experience?",type:"select",options:["Absolutely","Probably","I'm not sure","Probably not"]},
+      ],
+    };
+
+    function scoreAnswers(type,answers,amount,budget,spent){
+      let s=0;
+      const affMap={"Yes, well within budget":3,"It's tight but manageable":2,"I'd have to stretch my budget":1,"Not really, but I want it anyway":0};
+      s+=(affMap[answers.afford]??1)*2;
+      if(type==="physical"){
+        const urgMap={"Need it today":3,"Need it this week":2,"Nice to have soon":1,"Can wait weeks/months":0};
+        const ownMap={"No, nothing like it":3,"Sort of — mine is broken/old":2,"Yes, but this is an upgrade":1,"Yes, and mine works fine":0};
+        const regMap={"Definitely yes":3,"Probably yes":2,"Probably not":1,"Definitely not":0};
+        s+=(urgMap[answers.urgent]??1)*1.5+(ownMap[answers.already]??1)*2+(regMap[answers.regret]??1)*1.5;
+      } else if(type==="experience"){
+        const fomoMap={"Genuine excitement, I really want to go":3,"It's a special occasion":2,"Nothing better to do":1,"Social pressure / FOMO":0};
+        const memMap={"Definitely — it's unique":3,"Probably yes":2,"Maybe, hard to say":1,"Probably not":0};
+        const freqMap={"Rarely — it's a treat":3,"Once in a while":2,"Fairly regularly":1,"Very often":0};
+        s+=(fomoMap[answers.fomo]??1)*2+(memMap[answers.memory]??1)*1.5+(freqMap[answers.freq]??1);
+      } else if(type==="dining"){
+        const freqMap={"Rarely — this is a treat":3,"A few times":2,"Quite a lot":1,"Almost every day":0};
+        const cookMap={"No — this is a unique dish":3,"I could, but it'd be a lot of effort":2,"I could, but I don't feel like it":1,"Easily — I just don't want to":0};
+        const worthMap={"Absolutely":3,"Probably":2,"I'm not sure":1,"Probably not":0};
+        s+=(freqMap[answers.freq]??1)*1.5+(cookMap[answers.cook]??1)*1.5+(worthMap[answers.worth]??1)*2;
+      }
+      const bp=budget>0?amount/budget:0;
+      if(bp>0.3)s-=3; else if(bp>0.15)s-=1;
+      if(amount>budget-spent)s-=3;
+      return Math.max(0,Math.min(18,s));
+    }
+
+    function verdictLabel(s){ if(s>=12)return{label:"Go for it ✓",color:MINT[700]}; if(s>=7)return{label:"Think it over ~",color:SKY[600]}; return{label:"Skip it for now ✗",color:PEACH[700]}; }
+    function verdictText(s){ if(s>=12)return"Your answers suggest this is well-justified and fits your budget."; if(s>=7)return"There's some hesitation. Wait a day — if you still want it, go for it."; return"Timing or budget fit doesn't look great. Consider revisiting next month."; }
+
+    function Bar({pct,color,height=10,showLabel=true,bg=SKY[100]}){
+      return(
+        <div style={{height,background:bg,borderRadius:8,overflow:"hidden"}}>
+          <div style={{height:"100%",width:`${Math.min(100,Math.max(0,pct))}%`,background:color,borderRadius:8,transition:"width 0.5s",position:"relative"}}>
+            {showLabel&&pct>12&&<span style={{position:"absolute",right:6,top:"50%",transform:"translateY(-50%)",fontSize:9,color:"#fff",fontWeight:500}}>{pct.toFixed(0)}%</span>}
+          </div>
+        </div>
+      );
+    }
+
+    function Pill({children,bg,text,border}){
+      return <span style={{fontSize:12,padding:"2px 9px",borderRadius:20,background:bg,color:text,border:`1px solid ${border}`,whiteSpace:"nowrap"}}>{children}</span>;
+    }
+
+    function BtnRow({back,backLabel="← Back",fwd,fwdLabel,disabled}){
+      return(
+        <div style={{display:"flex",gap:8,marginTop:"1.25rem"}}>
+          <button onClick={back} style={{flex:1,borderRadius:10,border:`1.5px solid ${SKY[200]}`,background:"none",color:SKY[700],padding:"10px",cursor:"pointer",fontSize:14}}>{backLabel}</button>
+          <button onClick={fwd} disabled={disabled} style={{flex:2,borderRadius:10,border:"none",background:disabled?SKY[200]:SKY[500],color:"#fff",padding:"10px",cursor:disabled?"not-allowed":"pointer",fontSize:14,fontWeight:500}}>{fwdLabel}</button>
+        </div>
+      );
+    }
+
+    function PreLogModal({budget,spent,onConfirm,onCancel}){
+      const [step,setStep]=useState(0);
+      const [pType,setPType]=useState(null);
+      const [basic,setBasic]=useState({name:"",amount:"",tag:"Essential"});
+      const [answers,setAnswers]=useState({});
+      const [verdict,setVerdict]=useState(null);
+      const bNum=Number(budget)||0, amt=Number(basic.amount)||0;
+      const qs=pType?QUESTIONS[pType]:[];
+      const allAnswered=qs.filter(q=>q.type==="select").every(q=>answers[q.id]);
+      const submit=()=>{setVerdict(scoreAnswers(pType,answers,amt,bNum,spent));setStep(3);};
+      const vl=verdict!==null?verdictLabel(verdict):null;
+      const warned=verdict!==null&&verdict<12;
+      return(
+        <div style={{position:"fixed",inset:0,background:"rgba(7,43,85,0.25)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:999,padding:"1rem"}} onClick={onCancel}>
+          <div style={{background:"#fff",borderRadius:20,padding:"1.75rem",maxWidth:460,width:"100%",maxHeight:"90vh",overflowY:"auto",boxShadow:"0 8px 40px rgba(30,144,232,0.12)"}} onClick={e=>e.stopPropagation()}>
+            {step===0&&<>
+              <p style={{margin:"0 0 4px",fontSize:13,color:SKY[600]}}>New purchase</p>
+              <p style={{margin:"0 0 1.25rem",fontSize:17,fontWeight:500,color:SKY[900]}}>What kind of purchase is this?</p>
+              <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                {PURCHASE_TYPES.map(t=>(
+                  <button key={t.id} onClick={()=>{setPType(t.id);setStep(1);}} style={{display:"flex",alignItems:"center",gap:14,padding:"14px 16px",borderRadius:14,border:`1.5px solid ${SKY[200]}`,background:SKY[50],cursor:"pointer",textAlign:"left"}}>
+                    <span style={{fontSize:22}}>{t.icon}</span>
+                    <div><p style={{margin:0,fontSize:15,fontWeight:500,color:SKY[900]}}>{t.label}</p><p style={{margin:0,fontSize:12,color:SKY[500]}}>{t.desc}</p></div>
+                  </button>
+                ))}
+              </div>
+              <button onClick={onCancel} style={{width:"100%",marginTop:"1rem",borderRadius:10,border:`1.5px solid ${SKY[200]}`,background:"none",color:SKY[600],padding:"10px",cursor:"pointer",fontSize:14}}>Cancel</button>
+            </>}
+            {step===1&&<>
+              <p style={{margin:"0 0 4px",fontSize:13,color:SKY[600]}}>{PURCHASE_TYPES.find(t=>t.id===pType)?.label}</p>
+              <p style={{margin:"0 0 1.25rem",fontSize:17,fontWeight:500,color:SKY[900]}}>What are you buying?</p>
+              <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                <input placeholder="Name / description" value={basic.name} onChange={e=>setBasic(b=>({...b,name:e.target.value}))} style={{borderRadius:10,border:`1.5px solid ${SKY[200]}`,padding:"10px 14px",fontSize:14,color:SKY[900],outline:"none"}} />
+                <input type="number" placeholder="Amount ($)" value={basic.amount} onChange={e=>setBasic(b=>({...b,amount:e.target.value}))} style={{borderRadius:10,border:`1.5px solid ${SKY[200]}`,padding:"10px 14px",fontSize:14,color:SKY[900],outline:"none"}} />
+                <select value={basic.tag} onChange={e=>setBasic(b=>({...b,tag:e.target.value}))} style={{borderRadius:10,border:`1.5px solid ${SKY[200]}`,padding:"10px 14px",fontSize:14,color:SKY[900],background:"#fff"}}>
+                  {TAGS.map(t=><option key={t}>{t}</option>)}
+                </select>
+                {bNum>0&&amt>0&&<p style={{margin:0,fontSize:12,color:SKY[500]}}>{((amt/bNum)*100).toFixed(1)}% of budget · {fmt(bNum-spent)} remaining</p>}
+              </div>
+              <BtnRow back={()=>setStep(0)} fwd={()=>{if(basic.name.trim()&&amt>0)setStep(2);}} fwdLabel="Next →" disabled={!basic.name.trim()||!amt} />
+            </>}
+            {step===2&&<>
+              <p style={{margin:"0 0 4px",fontSize:13,color:SKY[600]}}>Quick check-in</p>
+              <p style={{margin:"0 0 1.25rem",fontSize:17,fontWeight:500,color:SKY[900]}}>Help me decide: {basic.name}</p>
+              <div style={{display:"flex",flexDirection:"column",gap:16}}>
+                {qs.map(q=>(
+                  <div key={q.id}>
+                    <p style={{margin:"0 0 6px",fontSize:13,fontWeight:500,color:SKY[800]}}>{q.label}</p>
+                    {q.type==="select"
+                      ?<div style={{display:"flex",flexDirection:"column",gap:5}}>{q.options.map(opt=><button key={opt} onClick={()=>setAnswers(a=>({...a,[q.id]:opt}))} style={{textAlign:"left",padding:"8px 12px",borderRadius:8,border:`1.5px solid ${answers[q.id]===opt?SKY[400]:SKY[100]}`,background:answers[q.id]===opt?SKY[50]:"#fff",color:answers[q.id]===opt?SKY[700]:SKY[800],cursor:"pointer",fontSize:13}}>{opt}</button>)}</div>
+                      :<textarea rows={2} placeholder={q.placeholder} value={answers[q.id]||""} onChange={e=>setAnswers(a=>({...a,[q.id]:e.target.value}))} style={{width:"100%",borderRadius:10,border:`1.5px solid ${SKY[200]}`,padding:"8px 12px",fontSize:13,color:SKY[900],resize:"none",boxSizing:"border-box"}} />
+                    }
+                  </div>
+                ))}
+              </div>
+              <BtnRow back={()=>setStep(1)} fwd={submit} fwdLabel="See verdict →" disabled={!allAnswered} />
+            </>}
+            {step===3&&verdict!==null&&<>
+              <p style={{margin:"0 0 4px",fontSize:13,color:SKY[600]}}>Verdict</p>
+              <p style={{margin:"0 0 1rem",fontSize:17,fontWeight:500,color:SKY[900]}}>{basic.name} — {fmt(amt)}</p>
+              <div style={{background:SKY[50],borderRadius:14,padding:"1rem 1.25rem",marginBottom:"1rem"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                  <span style={{fontSize:13,color:SKY[700]}}>Worth-it score</span>
+                  <span style={{fontSize:15,fontWeight:500,color:SKY[900]}}>{verdict}/18</span>
+                </div>
+                <Bar pct={(verdict/18)*100} color={verdict>=12?MINT[400]:verdict>=7?SKY[400]:PEACH[400]} />
+                <p style={{margin:"10px 0 0",fontSize:15,fontWeight:500,color:vl.color}}>{vl.label}</p>
+              </div>
+              <p style={{fontSize:13,color:SKY[700],lineHeight:1.7,margin:"0 0 1.25rem"}}>{verdictText(verdict)}</p>
+              <BtnRow back={()=>setStep(2)} backLabel="← Redo" fwd={()=>onConfirm({...basic,amount:amt,warned})} fwdLabel={warned?"Log it anyway":"Log it"} />
+              <button onClick={onCancel} style={{width:"100%",marginTop:8,borderRadius:10,border:`1.5px solid ${SKY[200]}`,background:"none",color:SKY[600],padding:"10px",cursor:"pointer",fontSize:14}}>Cancel</button>
+            </>}
+          </div>
+        </div>
+      );
+    }
+
+    function EditModal({purchase,onSave,onCancel}){
+      const [name,setName]=useState(purchase.name);
+      const [amount,setAmount]=useState(String(purchase.amount));
+      const [tag,setTag]=useState(purchase.tag);
+      const [date,setDate]=useState(purchase.date);
+      return(
+        <div style={{position:"fixed",inset:0,background:"rgba(7,43,85,0.25)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:999,padding:"1rem"}} onClick={onCancel}>
+          <div style={{background:"#fff",borderRadius:20,padding:"1.75rem",maxWidth:420,width:"100%",boxShadow:"0 8px 40px rgba(30,144,232,0.12)"}} onClick={e=>e.stopPropagation()}>
+            <p style={{margin:"0 0 1.25rem",fontSize:17,fontWeight:500,color:SKY[900]}}>Edit purchase</p>
+            <div style={{display:"flex",flexDirection:"column",gap:10}}>
+              <input value={name} onChange={e=>setName(e.target.value)} placeholder="Name" style={{borderRadius:10,border:`1.5px solid ${SKY[200]}`,padding:"10px 14px",fontSize:14,color:SKY[900],outline:"none"}} />
+              <input type="number" value={amount} onChange={e=>setAmount(e.target.value)} placeholder="Amount" style={{borderRadius:10,border:`1.5px solid ${SKY[200]}`,padding:"10px 14px",fontSize:14,color:SKY[900],outline:"none"}} />
+              <select value={tag} onChange={e=>setTag(e.target.value)} style={{borderRadius:10,border:`1.5px solid ${SKY[200]}`,padding:"10px 14px",fontSize:14,color:SKY[900],background:"#fff"}}>
+                {TAGS.map(t=><option key={t}>{t}</option>)}
+              </select>
+              <input type="date" value={date} onChange={e=>setDate(e.target.value)} style={{borderRadius:10,border:`1.5px solid ${SKY[200]}`,padding:"10px 14px",fontSize:14,color:SKY[900],outline:"none"}} />
+            </div>
+            <div style={{display:"flex",gap:8,marginTop:"1.25rem"}}>
+              <button onClick={onCancel} style={{flex:1,borderRadius:10,border:`1.5px solid ${SKY[200]}`,background:"none",color:SKY[700],padding:"10px",cursor:"pointer",fontSize:14}}>Cancel</button>
+              <button onClick={()=>onSave({...purchase,name,amount:Number(amount),tag,date})} style={{flex:2,borderRadius:10,border:"none",background:SKY[500],color:"#fff",padding:"10px",cursor:"pointer",fontSize:14,fontWeight:500}}>Save changes</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function RecurringModal({onSave,onCancel,initial}){
+      const [name,setName]=useState(initial?.name||"");
+      const [amount,setAmount]=useState(initial?String(initial.amount):"");
+      const [tag,setTag]=useState(initial?.tag||"Essential");
+      const [kind,setKind]=useState(initial?.kind||"fixed");
+      return(
+        <div style={{position:"fixed",inset:0,background:"rgba(7,43,85,0.25)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:999,padding:"1rem"}} onClick={onCancel}>
+          <div style={{background:"#fff",borderRadius:20,padding:"1.75rem",maxWidth:420,width:"100%",boxShadow:"0 8px 40px rgba(30,144,232,0.12)"}} onClick={e=>e.stopPropagation()}>
+            <p style={{margin:"0 0 4px",fontSize:13,color:ROSE[500]}}>Recurring expense</p>
+            <p style={{margin:"0 0 1.25rem",fontSize:17,fontWeight:500,color:SKY[900]}}>{initial?"Edit recurring":"Add recurring"}</p>
+            <div style={{display:"flex",flexDirection:"column",gap:10}}>
+              <input value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Rent, Netflix…" style={{borderRadius:10,border:`1.5px solid ${SKY[200]}`,padding:"10px 14px",fontSize:14,color:SKY[900],outline:"none"}} />
+              <input type="number" value={amount} onChange={e=>setAmount(e.target.value)} placeholder="Amount ($)" style={{borderRadius:10,border:`1.5px solid ${SKY[200]}`,padding:"10px 14px",fontSize:14,color:SKY[900],outline:"none"}} />
+              <select value={tag} onChange={e=>setTag(e.target.value)} style={{borderRadius:10,border:`1.5px solid ${SKY[200]}`,padding:"10px 14px",fontSize:14,color:SKY[900],background:"#fff"}}>
+                {TAGS.map(t=><option key={t}>{t}</option>)}
+              </select>
+              <div style={{display:"flex",gap:8}}>
+                {["fixed","variable"].map(k=>(
+                  <button key={k} onClick={()=>setKind(k)} style={{flex:1,padding:"10px",borderRadius:10,border:`1.5px solid ${kind===k?ROSE[400]:SKY[200]}`,background:kind===k?ROSE[50]:"#fff",color:kind===k?ROSE[700]:SKY[700],cursor:"pointer",fontSize:13,fontWeight:kind===k?500:400}}>
+                    {k==="fixed"?"Fixed":"Variable"}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div style={{display:"flex",gap:8,marginTop:"1.25rem"}}>
+              <button onClick={onCancel} style={{flex:1,borderRadius:10,border:`1.5px solid ${SKY[200]}`,background:"none",color:SKY[700],padding:"10px",cursor:"pointer",fontSize:14}}>Cancel</button>
+              <button onClick={()=>{if(name.trim()&&Number(amount)>0)onSave({id:initial?.id||uuid(),name,amount:Number(amount),tag,kind});}} style={{flex:2,borderRadius:10,border:"none",background:ROSE[500],color:"#fff",padding:"10px",cursor:"pointer",fontSize:14,fontWeight:500}}>Save</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function InsightsPanel({purchases,budget,savings,payday}){
+      const bNum=Number(budget)||0;
+      const spent=purchases.reduce((s,p)=>s+p.amount,0);
+      const warned=purchases.filter(p=>p.warned).length;
+      const warnedAmt=purchases.filter(p=>p.warned).reduce((s,p)=>s+p.amount,0);
+      const tagTotals=TAGS.reduce((acc,t)=>({...acc,[t]:purchases.filter(p=>p.tag===t).reduce((s,p)=>s+p.amount,0)}),{});
+      const biggest=[...purchases].sort((a,b)=>b.amount-a.amount).slice(0,3);
+      const avg=purchases.length>0?spent/purchases.length:0;
+      const savingsNum=Number(savings)||0;
+      const saved=Math.max(0,bNum-spent);
+      const savingsPct=savingsNum>0?Math.min(100,(saved/savingsNum)*100):0;
+      const tagColors={"Essential":MINT[400],"Nice to have":LILAC[400],"Impulse":PEACH[400]};
+      const today=new Date().getDate();
+      const payDay=Number(payday)||1;
+      const dayOfCycle=today>=payDay?today-payDay+1:null;
+      const cycleDays=30;
+      const daysLeft=dayOfCycle!==null?Math.max(0,cycleDays-dayOfCycle):0;
+      const dailyRate=dayOfCycle&&dayOfCycle>0?spent/dayOfCycle:0;
+      const projected=spent+dailyRate*daysLeft;
+      const projectedPct=bNum>0?Math.min(130,(projected/bNum)*100):0;
+      const effective=savingsNum>0?bNum-savingsNum:bNum;
+      const safeDaily=daysLeft>0?Math.max(0,(effective-spent)/daysLeft):0;
+      const projColor=projected>bNum?PEACH[400]:projected>effective?AMBER[400]:MINT[400];
+      const projBg=projected>bNum?PEACH[50]:projected>effective?AMBER[50]:MINT[50];
+      const projText=projected>bNum?PEACH[700]:projected>effective?AMBER[700]:MINT[700];
+      const projVerdict=projected>bNum?"Heading toward overspend":projected>effective?"May miss savings goal":"On track";
+      const projIcon=projected>bNum?"↑":projected>effective?"~":"✓";
+      return(
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          {bNum>0&&purchases.length>0&&dayOfCycle&&(
+            <div style={{background:projBg,borderRadius:18,border:`1.5px solid ${projColor}44`,padding:"1.25rem"}}>
+              <p style={{margin:"0 0 12px",fontSize:13,fontWeight:500,color:projText}}>Spending projection — day {dayOfCycle} of your pay cycle</p>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}}>
+                {[[fmt(projected),"Projected spend"],[fmt(safeDaily)+"/day","Safe daily budget"],[daysLeft+" days left","Until next payday"],[projVerdict+" "+projIcon,"Verdict"]].map(([v,l],i)=>(
+                  <div key={l} style={{background:"rgba(255,255,255,0.7)",borderRadius:12,padding:"0.75rem"}}>
+                    <p style={{margin:0,fontSize:i===3?13:15,fontWeight:500,color:i===3?projText:SKY[900]}}>{v}</p>
+                    <p style={{margin:"2px 0 0",fontSize:11,color:SKY[500]}}>{l}</p>
+                  </div>
+                ))}
+              </div>
+              <div style={{height:10,background:"rgba(255,255,255,0.5)",borderRadius:8,overflow:"hidden",position:"relative"}}>
+                <div style={{position:"absolute",top:0,left:0,height:"100%",width:`${Math.min(100,bNum>0?(spent/bNum)*100:0)}%`,background:SKY[300],borderRadius:8}} />
+                <div style={{position:"absolute",top:0,left:0,height:"100%",width:`${Math.min(100,projectedPct)}%`,background:projColor,opacity:0.35,borderRadius:8}} />
+              </div>
+              <div style={{display:"flex",justifyContent:"space-between",marginTop:4}}>
+                <span style={{fontSize:11,color:SKY[500]}}>Spent: {fmt(spent)}</span>
+                <span style={{fontSize:11,color:SKY[500]}}>Budget: {fmt(bNum)}</span>
+              </div>
+            </div>
+          )}
+          {savingsNum>0&&(
+            <div style={{background:"#fff",borderRadius:18,border:`1.5px solid ${MINT[200]}`,padding:"1.25rem"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                <p style={{margin:0,fontSize:13,fontWeight:500,color:MINT[700]}}>Savings goal</p>
+                <span style={{fontSize:13,color:saved>=savingsNum?MINT[700]:SKY[600],fontWeight:500}}>{fmt(saved)} / {fmt(savingsNum)}</span>
+              </div>
+              <Bar pct={savingsPct} color={saved>=savingsNum?MINT[400]:SKY[400]} bg={MINT[100]} />
+              <p style={{margin:"6px 0 0",fontSize:12,color:MINT[700]}}>{saved>=savingsNum?"Goal reached this month! 🌿":`${fmt(savingsNum-saved)} more to save`}</p>
+            </div>
+          )}
+          {warned>0&&(
+            <div style={{background:AMBER[50],borderRadius:18,border:`1.5px solid ${AMBER[100]}`,padding:"1.25rem"}}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <div style={{width:36,height:36,borderRadius:10,background:AMBER[100],display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>⚠️</div>
+                <div>
+                  <p style={{margin:0,fontSize:13,fontWeight:500,color:AMBER[700]}}>Ignored warnings</p>
+                  <p style={{margin:"2px 0 0",fontSize:13,color:AMBER[700]}}>{warned} purchase{warned!==1?"s":""} logged after a caution — totalling {fmt(warnedAmt)}</p>
+                </div>
+              </div>
+            </div>
+          )}
+          {purchases.length>0&&(
+            <div style={{background:"#fff",borderRadius:18,border:`1.5px solid ${SKY[100]}`,padding:"1.25rem"}}>
+              <p style={{margin:"0 0 12px",fontSize:13,fontWeight:500,color:SKY[800]}}>Spending by category</p>
+              <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                {TAGS.map(t=>{const a=tagTotals[t];if(!a)return null;const p=bNum>0?(a/bNum*100):0;return(<div key={t}><div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{fontSize:13,color:SKY[800]}}>{t}</span><span style={{fontSize:13,color:SKY[600]}}>{fmt(a)}{bNum>0?` · ${p.toFixed(1)}%`:""}</span></div><Bar pct={p} color={tagColors[t]} height={7} showLabel={false} bg={SKY[50]} /></div>);})}
+              </div>
+            </div>
+          )}
+          {purchases.length>0&&(
+            <div style={{background:"#fff",borderRadius:18,border:`1.5px solid ${SKY[100]}`,padding:"1.25rem"}}>
+              <p style={{margin:"0 0 12px",fontSize:13,fontWeight:500,color:SKY[800]}}>Quick stats</p>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}}>
+                {[[purchases.length+" purchases","Total logged"],[fmt(avg),"Avg per purchase"],[purchases.filter(p=>p.tag==="Impulse").length+" impulse","Impulse buys"],[fmt(tagTotals["Impulse"]||0),"Spent on impulse"]].map(([v,l])=>(
+                  <div key={l} style={{background:SKY[50],borderRadius:12,padding:"0.75rem"}}>
+                    <p style={{margin:0,fontSize:14,fontWeight:500,color:SKY[900]}}>{v}</p>
+                    <p style={{margin:"2px 0 0",fontSize:11,color:SKY[500]}}>{l}</p>
+                  </div>
+                ))}
+              </div>
+              {biggest.length>0&&<><p style={{margin:"0 0 8px",fontSize:12,color:SKY[600]}}>Top 3 purchases</p>{biggest.map((p,i)=><div key={p.id} style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}><span style={{fontSize:11,color:SKY[400],minWidth:14}}>#{i+1}</span><span style={{flex:1,fontSize:13,color:SKY[800]}}>{p.name}</span><span style={{fontSize:13,fontWeight:500,color:SKY[700]}}>{fmt(p.amount)}</span></div>)}</>}
+            </div>
+          )}
+          {purchases.length===0&&<p style={{textAlign:"center",color:SKY[400],fontSize:13,padding:"1rem 0"}}>No purchases yet — insights will appear as you log spending.</p>}
+        </div>
+      );
+    }
+
+    const SKEY = "spending-tracker-v2";
+    function loadData(){ try{ const r=localStorage.getItem(SKEY); if(r)return JSON.parse(r); }catch{} return{purchases:[],budgets:{},settings:{payday:"1"},recurring:[],envelopes:{}}; }
+    function saveData(d){ try{ localStorage.setItem(SKEY,JSON.stringify(d)); }catch{} }
+
+    function App(){
+      const [month,setMonth]=useState(currentMonthStr());
+      const [data,setData]=useState(loadData);
+      const [showAdd,setShowAdd]=useState(false);
+      const [editP,setEditP]=useState(null);
+      const [showRecurring,setShowRecurring]=useState(false);
+      const [editRec,setEditRec]=useState(null);
+      const [tab,setTab]=useState("tracker");
+      const [budgetSaved,setBudgetSaved]=useState(false);
+      const [undoStack,setUndoStack]=useState([]);
+      const [showExport,setShowExport]=useState(false);
+      const [restoreText,setRestoreText]=useState("");
+      const undoTimer=useRef(null);
+
+      const mutate=useCallback(fn=>{setData(prev=>{const next=fn(prev);saveData(next);return next;});},[]);
+
+      useEffect(()=>{
+        const alreadyAdded=data.purchases.filter(p=>p.month===month&&p.recurring);
+        const missing=data.recurring.filter(r=>!alreadyAdded.find(p=>p.recurringId===r.id));
+        if(missing.length===0)return;
+        mutate(prev=>({...prev,purchases:[...missing.map(r=>({id:uuid(),month,name:r.name,amount:r.amount,tag:r.tag,date:todayStr(),warned:false,recurring:true,recurringId:r.id,kind:r.kind})),...prev.purchases]}));
+      },[month,data.recurring]);
+
+      const monthBudget=data.budgets[month]||{budget:"",savings:""};
+      const budget=monthBudget.budget||"";
+      const savings=monthBudget.savings||"";
+      const payday=data.settings?.payday||"1";
+      const purchases=data.purchases.filter(p=>p.month===month);
+      const envelopes=data.envelopes[month]||{};
+      const bNum=Number(budget)||0;
+      const spent=purchases.reduce((s,p)=>s+p.amount,0);
+      const remaining=bNum-spent;
+      const pct=bNum>0?Math.min(100,(spent/bNum)*100):0;
+      const barColor=pct>90?PEACH[400]:pct>70?AMBER[400]:MINT[400];
+      const tagCounts=TAGS.reduce((acc,t)=>({...acc,[t]:purchases.filter(p=>p.tag===t).length}),{});
+      const warnedCount=purchases.filter(p=>p.warned).length;
+      const [yr,mo]=month.split("-");
+      const monthLabel=`${MONTHS[Number(mo)-1]} ${yr}`;
+
+      const setMonthField=(field,val)=>{setBudgetSaved(false);mutate(prev=>({...prev,budgets:{...prev.budgets,[month]:{...prev.budgets[month],[field]:val}}}));};
+      const setEnvelope=(tag,val)=>mutate(prev=>({...prev,envelopes:{...prev.envelopes,[month]:{...prev.envelopes[month],[tag]:val}}}));
+      const confirmPurchase=p=>{mutate(prev=>({...prev,purchases:[{id:uuid(),month,name:p.name,amount:p.amount,tag:p.tag,date:todayStr(),warned:p.warned||false},...prev.purchases]}));setShowAdd(false);};
+      const saveEdit=p=>{mutate(prev=>({...prev,purchases:prev.purchases.map(x=>x.id===p.id?p:x)}));setEditP(null);};
+      const removePurchase=id=>{
+        const target=data.purchases.find(p=>p.id===id);
+        if(!target)return;
+        setUndoStack(s=>[...s,target]);
+        mutate(prev=>({...prev,purchases:prev.purchases.filter(p=>p.id!==id)}));
+        clearTimeout(undoTimer.current);
+        undoTimer.current=setTimeout(()=>setUndoStack([]),6000);
+      };
+      const undoDelete=()=>{const last=undoStack[undoStack.length-1];if(!last)return;mutate(prev=>({...prev,purchases:[last,...prev.purchases]}));setUndoStack(s=>s.slice(0,-1));};
+      const saveRecurring=r=>{mutate(prev=>({...prev,recurring:editRec?prev.recurring.map(x=>x.id===r.id?r:x):[r,...prev.recurring]}));setEditRec(null);setShowRecurring(false);};
+      const removeRecurring=id=>mutate(prev=>({...prev,recurring:prev.recurring.filter(r=>r.id!==id)}));
+      const exportJSON=()=>setShowExport(true);
+      const importJSON=()=>{try{const d=JSON.parse(restoreText);mutate(()=>d);setRestoreText("");alert("Backup restored!");}catch{alert("Invalid backup — make sure you pasted the full JSON.");}};
+      const tagSpent=tag=>purchases.filter(p=>p.tag===tag).reduce((s,p)=>s+p.amount,0);
+
+      return(
+        <div style={{minHeight:"100vh",background:`linear-gradient(160deg,${MINT[50]} 0%,${SKY[50]} 40%,${PEACH[50]} 100%)`,padding:"1.5rem 1rem"}}>
+          <div style={{maxWidth:560,margin:"0 auto"}}>
+            {showExport&&(
+              <div style={{position:"fixed",inset:0,background:"rgba(7,43,85,0.25)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:999,padding:"1rem"}} onClick={()=>setShowExport(false)}>
+                <div style={{background:"#fff",borderRadius:20,padding:"1.75rem",maxWidth:480,width:"100%",boxShadow:"0 8px 40px rgba(30,144,232,0.12)"}} onClick={e=>e.stopPropagation()}>
+                  <p style={{margin:"0 0 4px",fontSize:13,color:SAGE[700]}}>Backup data</p>
+                  <p style={{margin:"0 0 12px",fontSize:15,fontWeight:500,color:SKY[900]}}>Copy and save this somewhere safe</p>
+                  <textarea readOnly value={JSON.stringify(data,null,2)} style={{width:"100%",height:240,borderRadius:10,border:`1.5px solid ${SKY[200]}`,padding:"10px 12px",fontSize:11,fontFamily:"monospace",color:SKY[800],resize:"none",boxSizing:"border-box",background:SKY[50]}} onClick={e=>e.target.select()} />
+                  <p style={{margin:"8px 0 16px",fontSize:12,color:SKY[500]}}>Click the box to select all, then copy (Ctrl+C / Cmd+C).</p>
+                  <button onClick={()=>setShowExport(false)} style={{width:"100%",borderRadius:10,border:"none",background:SKY[500],color:"#fff",padding:"10px",cursor:"pointer",fontSize:14,fontWeight:500}}>Done</button>
+                </div>
+              </div>
+            )}
+            {showAdd&&<PreLogModal budget={bNum} spent={spent} onConfirm={confirmPurchase} onCancel={()=>setShowAdd(false)} />}
+            {editP&&<EditModal purchase={editP} onSave={saveEdit} onCancel={()=>setEditP(null)} />}
+            {(showRecurring||editRec)&&<RecurringModal initial={editRec} onSave={saveRecurring} onCancel={()=>{setShowRecurring(false);setEditRec(null);}} />}
+
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"1.25rem",flexWrap:"wrap",gap:8}}>
+              <div>
+                <h2 style={{margin:0,fontSize:22,fontWeight:500,color:SKY[900]}}>Spending tracker</h2>
+                <p style={{margin:0,fontSize:13,color:SKY[500]}}>{monthLabel}</p>
+              </div>
+              <input type="month" value={month} onChange={e=>setMonth(e.target.value)} style={{fontSize:13,padding:"6px 10px",borderRadius:10,border:`1.5px solid ${SKY[200]}`,background:"#fff",color:SKY[800],outline:"none"}} />
+            </div>
+
+            <div style={{display:"flex",gap:4,marginBottom:"1rem",background:"rgba(255,255,255,0.6)",borderRadius:12,padding:4}}>
+              {[["tracker","Tracker"],["recurring","Recurring"],["insights","Insights"]].map(([id,label])=>(
+                <button key={id} onClick={()=>setTab(id)} style={{flex:1,borderRadius:9,border:"none",background:tab===id?"#fff":"none",color:tab===id?SKY[800]:SKY[400],padding:"8px",cursor:"pointer",fontSize:13,fontWeight:tab===id?500:400,transition:"all 0.2s"}}>
+                  {label}{id==="insights"&&warnedCount>0?<span style={{marginLeft:5,fontSize:11,background:AMBER[400],color:"#fff",borderRadius:8,padding:"1px 6px"}}>{warnedCount}</span>:null}
+                </button>
+              ))}
+            </div>
+
+            {tab==="tracker"&&<>
+              <div style={{background:"rgba(255,255,255,0.85)",borderRadius:18,border:`1.5px solid ${SKY[100]}`,padding:"1.25rem",marginBottom:"1rem"}}>
+                <p style={{margin:"0 0 10px",fontSize:13,color:SKY[600]}}>Budget & savings goal</p>
+                <div style={{display:"flex",gap:8,marginBottom:8}}>
+                  <input type="number" placeholder="Monthly budget ($)" value={budget} onChange={e=>setMonthField("budget",e.target.value)} style={{flex:1,borderRadius:10,border:`1.5px solid ${SKY[200]}`,padding:"10px 14px",fontSize:14,color:SKY[900],outline:"none"}} />
+                </div>
+                <div style={{display:"flex",gap:8,marginBottom:8}}>
+                  <input type="number" placeholder="Savings goal ($)" value={savings} onChange={e=>setMonthField("savings",e.target.value)} style={{flex:1,borderRadius:10,border:`1.5px solid ${SKY[200]}`,padding:"10px 14px",fontSize:14,color:SKY[900],outline:"none"}} />
+                  <button onClick={()=>setBudgetSaved(true)} style={{borderRadius:10,border:"none",background:budgetSaved?MINT[100]:SKY[500],color:budgetSaved?MINT[700]:"#fff",padding:"10px 18px",cursor:"pointer",fontSize:14,fontWeight:500,whiteSpace:"nowrap"}}>{budgetSaved?"Saved ✓":"Save"}</button>
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:SKY[50],borderRadius:10,border:`1.5px solid ${SKY[100]}`}}>
+                  <span style={{fontSize:13,color:SKY[700],whiteSpace:"nowrap"}}>Pay day: the</span>
+                  <input type="number" min="1" max="31" value={payday} onChange={e=>mutate(prev=>({...prev,settings:{...prev.settings,payday:e.target.value}}))} style={{width:52,borderRadius:8,border:`1.5px solid ${SKY[200]}`,padding:"6px 10px",fontSize:14,color:SKY[900],outline:"none",textAlign:"center"}} />
+                  <span style={{fontSize:13,color:SKY[700]}}>of each month</span>
+                </div>
+                {bNum>0&&<>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,margin:"1rem 0"}}>
+                    {[[fmt(bNum),"Budget",SKY[600]],[fmt(spent),"Spent",spent>bNum?PEACH[700]:SKY[900]],[fmt(remaining),"Remaining",remaining<0?PEACH[700]:MINT[700]]].map(([v,l,c])=>(
+                      <div key={l} style={{background:SKY[50],borderRadius:12,padding:"0.75rem",textAlign:"center"}}>
+                        <p style={{margin:0,fontSize:15,fontWeight:500,color:c}}>{v}</p>
+                        <p style={{margin:"3px 0 0",fontSize:11,color:SKY[500],textTransform:"uppercase",letterSpacing:"0.05em"}}>{l}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <Bar pct={pct} color={barColor} height={12} />
+                  {purchases.length>0&&<div style={{display:"flex",gap:6,marginTop:8}}>{TAGS.map(t=>tagCounts[t]>0&&<div key={t} style={{height:5,flex:tagCounts[t],background:TAG_STYLE[t].border,borderRadius:4,minWidth:12}} />)}</div>}
+                </>}
+              </div>
+
+              <div style={{background:"rgba(255,255,255,0.85)",borderRadius:18,border:`1.5px solid ${LILAC[200]}`,padding:"1.25rem",marginBottom:"1rem"}}>
+                <p style={{margin:"0 0 12px",fontSize:13,fontWeight:500,color:LILAC[700]}}>Envelope budgets</p>
+                <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                  {TAGS.map(t=>{
+                    const ts=TAG_STYLE[t];const env=Number(envelopes[t])||0;const s=tagSpent(t);const left=env-s;const p=env>0?Math.min(100,(s/env)*100):0;
+                    return(<div key={t}>
+                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                        <Pill bg={ts.bg} text={ts.text} border={ts.border}>{t}</Pill>
+                        <input type="number" placeholder="Set limit ($)" value={envelopes[t]||""} onChange={e=>setEnvelope(t,e.target.value)} style={{width:110,borderRadius:8,border:`1.5px solid ${SKY[200]}`,padding:"5px 10px",fontSize:13,color:SKY[900],outline:"none"}} />
+                        {env>0&&<span style={{fontSize:12,color:left<0?PEACH[700]:MINT[700],marginLeft:"auto"}}>{left<0?"over: "+fmt(Math.abs(left)):"left: "+fmt(left)}</span>}
+                      </div>
+                      {env>0&&<Bar pct={p} color={p>100?PEACH[400]:ts.bar} height={6} showLabel={false} bg={SKY[50]} />}
+                    </div>);
+                  })}
+                </div>
+              </div>
+
+              <button onClick={()=>setShowAdd(true)} style={{width:"100%",borderRadius:14,border:"none",background:`linear-gradient(90deg,${SKY[500]},${MINT[500]})`,color:"#fff",padding:"14px",cursor:"pointer",fontSize:15,fontWeight:500,marginBottom:"1rem"}}>
+                + Add a purchase
+              </button>
+
+              {undoStack.length>0&&(
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:LEMON[50],border:`1px solid ${LEMON[400]}`,borderRadius:12,padding:"10px 14px",marginBottom:"1rem"}}>
+                  <span style={{fontSize:13,color:LEMON[700]}}>Purchase removed</span>
+                  <button onClick={undoDelete} style={{fontSize:13,fontWeight:500,color:LEMON[700],background:"none",border:`1px solid ${LEMON[400]}`,borderRadius:8,padding:"4px 12px",cursor:"pointer"}}>Undo</button>
+                </div>
+              )}
+
+              {purchases.length>0&&(
+                <div style={{background:"rgba(255,255,255,0.85)",borderRadius:18,border:`1.5px solid ${SKY[100]}`,padding:"1.25rem"}}>
+                  <p style={{margin:"0 0 12px",fontSize:13,color:SKY[600]}}>Purchases — {monthLabel}</p>
+                  <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                    {purchases.map(p=>{
+                      const ts=TAG_STYLE[p.tag];const bPct=bNum>0?((p.amount/bNum)*100).toFixed(1):null;const bW=bNum>0?Math.min(100,(p.amount/bNum)*100):0;
+                      return(<div key={p.id} style={{background:p.warned?AMBER[50]:p.recurring?ROSE[50]:SKY[50],borderRadius:12,padding:"10px 14px",border:p.warned?`1px solid ${AMBER[100]}`:p.recurring?`1px solid ${ROSE[100]}`:"none"}}>
+                        <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6,flexWrap:"wrap"}}>
+                          {p.warned&&<Pill bg={AMBER[100]} text={AMBER[700]} border={AMBER[400]}>⚠ warned</Pill>}
+                          {p.recurring&&<Pill bg={ROSE[100]} text={ROSE[700]} border={ROSE[400]}>{p.kind==="fixed"?"↻ fixed":"↻ variable"}</Pill>}
+                          <span style={{flex:1,fontSize:14,fontWeight:500,color:SKY[900],minWidth:80}}>{p.name}</span>
+                          <Pill bg={ts.bg} text={ts.text} border={ts.border}>{p.tag}</Pill>
+                          <span style={{fontSize:14,fontWeight:500,color:SKY[800]}}>{fmt(p.amount)}</span>
+                          <button onClick={()=>setEditP(p)} style={{fontSize:11,padding:"2px 8px",borderRadius:7,border:`1px solid ${SKY[200]}`,background:"#fff",color:SKY[600],cursor:"pointer"}}>Edit</button>
+                          <button onClick={()=>removePurchase(p.id)} style={{fontSize:11,padding:"2px 8px",borderRadius:7,border:`1px solid ${PEACH[400]}`,background:PEACH[100],color:PEACH[700],cursor:"pointer"}}>✕</button>
+                        </div>
+                        <div style={{display:"flex",alignItems:"center",gap:8}}>
+                          <div style={{flex:1,height:5,background:SKY[100],borderRadius:4,overflow:"hidden"}}><div style={{height:"100%",width:`${bW}%`,background:SKY[300],borderRadius:4}} /></div>
+                          <span style={{fontSize:11,color:SKY[500],whiteSpace:"nowrap"}}>{bPct?`${bPct}% of budget`:p.date}</span>
+                        </div>
+                        <p style={{margin:"3px 0 0",fontSize:11,color:SKY[400]}}>{p.date}</p>
+                      </div>);
+                    })}
+                  </div>
+                </div>
+              )}
+              {purchases.length===0&&<p style={{textAlign:"center",color:SKY[400],fontSize:14,marginTop:"1rem"}}>No purchases yet for {monthLabel}.</p>}
+            </>}
+
+            {tab==="recurring"&&<>
+              <div style={{background:"rgba(255,255,255,0.85)",borderRadius:18,border:`1.5px solid ${ROSE[200]}`,padding:"1.25rem",marginBottom:"1rem"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                  <p style={{margin:0,fontSize:13,fontWeight:500,color:ROSE[700]}}>Recurring expenses</p>
+                  <button onClick={()=>setShowRecurring(true)} style={{fontSize:13,padding:"6px 14px",borderRadius:10,border:"none",background:ROSE[500],color:"#fff",cursor:"pointer",fontWeight:500}}>+ Add</button>
+                </div>
+                <p style={{margin:"0 0 12px",fontSize:12,color:SKY[500]}}>These auto-add to each month when you switch to it.</p>
+                {data.recurring.length===0&&<p style={{fontSize:13,color:SKY[400],textAlign:"center",padding:"1rem 0"}}>No recurring expenses yet.</p>}
+                <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                  {data.recurring.map(r=>{const ts=TAG_STYLE[r.tag];return(
+                    <div key={r.id} style={{background:ROSE[50],borderRadius:12,padding:"10px 14px",border:`1px solid ${ROSE[100]}`,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                      <div style={{flex:1,minWidth:100}}>
+                        <p style={{margin:0,fontSize:14,fontWeight:500,color:SKY[900]}}>{r.name}</p>
+                        <span style={{fontSize:11,padding:"1px 7px",borderRadius:6,background:r.kind==="fixed"?MINT[100]:AMBER[100],color:r.kind==="fixed"?MINT[700]:AMBER[700],border:`1px solid ${r.kind==="fixed"?MINT[400]:AMBER[400]}`}}>{r.kind}</span>
+                      </div>
+                      <Pill bg={ts.bg} text={ts.text} border={ts.border}>{r.tag}</Pill>
+                      <span style={{fontSize:14,fontWeight:500,color:SKY[800]}}>{fmt(r.amount)}</span>
+                      <button onClick={()=>setEditRec(r)} style={{fontSize:11,padding:"2px 8px",borderRadius:7,border:`1px solid ${SKY[200]}`,background:"#fff",color:SKY[600],cursor:"pointer"}}>Edit</button>
+                      <button onClick={()=>removeRecurring(r.id)} style={{fontSize:11,padding:"2px 8px",borderRadius:7,border:`1px solid ${PEACH[400]}`,background:PEACH[100],color:PEACH[700],cursor:"pointer"}}>✕</button>
+                    </div>
+                  );})}
+                </div>
+              </div>
+              <div style={{background:"rgba(255,255,255,0.85)",borderRadius:18,border:`1.5px solid ${SAGE[200]}`,padding:"1.25rem"}}>
+                <p style={{margin:"0 0 4px",fontSize:13,fontWeight:500,color:SAGE[700]}}>Backup & restore</p>
+                <p style={{margin:"0 0 12px",fontSize:12,color:SKY[500]}}>Export a JSON backup or restore from a previous one.</p>
+                <button onClick={exportJSON} style={{width:"100%",borderRadius:10,border:`1.5px solid ${SAGE[400]}`,background:SAGE[50],color:SAGE[700],padding:"10px",cursor:"pointer",fontSize:13,fontWeight:500,marginBottom:8}}>Export backup — copy JSON</button>
+                <p style={{margin:"12px 0 6px",fontSize:12,color:SKY[600],fontWeight:500}}>Restore from backup</p>
+                <textarea value={restoreText} onChange={e=>setRestoreText(e.target.value)} placeholder="Paste your backup JSON here…" style={{width:"100%",height:100,borderRadius:10,border:`1.5px solid ${SKY[200]}`,padding:"8px 12px",fontSize:12,fontFamily:"monospace",color:SKY[900],resize:"none",boxSizing:"border-box",marginBottom:8}} />
+                <button onClick={importJSON} disabled={!restoreText.trim()} style={{width:"100%",borderRadius:10,border:`1.5px solid ${LILAC[400]}`,background:restoreText.trim()?LILAC[50]:"#f5f5f5",color:restoreText.trim()?LILAC[700]:SKY[300],padding:"10px",cursor:restoreText.trim()?"pointer":"not-allowed",fontSize:13,fontWeight:500}}>Restore backup</button>
+              </div>
+            </>}
+
+            {tab==="insights"&&<InsightsPanel purchases={purchases} budget={budget} savings={savings} payday={payday} />}
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>
